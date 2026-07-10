@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MP4 フレーム抽出ツール (高安定版)</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f0f3f5;
+            color: #333;
+            max-width: 850px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        .container {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+        .upload-area {
+            border: 2px dashed #3498db;
+            padding: 30px;
+            text-align: center;
+            background: #f8fafc;
+            cursor: pointer;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+            color: #3498db;
+            transition: all 0.2s;
+        }
+        .upload-area:hover {
+            background: #eef7fc;
+            border-color: #2980b9;
+        }
+        video {
+            width: 100%;
+            max-height: 400px;
+            display: none;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            background: #000;
+        }
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #e9ecef;
+        }
+        .setting-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .setting-item label {
+            font-size: 13px;
+            font-weight: bold;
+            color: #495057;
+        }
+        .setting-item input {
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        button {
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        .btn-blue { background-color: #3498db; }
+        .btn-blue:hover { background-color: #2980b9; }
+        .btn-green { background-color: #2ecc71; }
+        .btn-green:hover { background-color: #27ae60; }
+        .btn-orange { background-color: #e67e22; }
+        .btn-orange:hover { background-color: #d35400; }
+        
+        button:disabled {
+            background-color: #cbd5e1 !important;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #status {
+            text-align: center;
+            font-weight: bold;
+            color: #2c3e50;
+            padding: 10px;
+            background: #edf2f7;
+            border-radius: 6px;
+            min-height: 20px;
+        }
+        .info-text {
+            text-align: center;
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🎬 MP4 フレーム抽出ツール</h1>
+    <div class="info-text">範囲指定＆クラッシュ防止ウェイト機能付き</div>
+    
+    <div class="upload-area" onclick="document.getElementById('videoInput').click()">
+        動画ファイル（.mp4）を選択またはドロップ
+        <input type="file" id="videoInput" accept="video/mp4" style="display:none">
+    </div>
+
+    <video id="videoPlayer" controls></video>
+
+    <div class="settings-grid">
+        <div class="setting-item">
+            <label for="fpsInput">動画のFPS (1秒あたりの枚数)</label>
+            <input type="number" id="fpsInput" value="30" min="1" max="120">
+        </div>
+        <div class="setting-item">
+            <label for="waitInput">処理の間隔 (ミリ秒) ※推奨: 200〜500</label>
+            <input type="number" id="waitInput" value="300" min="50" max="3000">
+        </div>
+        <div class="setting-item">
+            <label id="startFrameLabel" for="startFrameInput">開始フレーム (0〜)</label>
+            <input type="number" id="startFrameInput" value="0" min="0" disabled>
+        </div>
+        <div class="setting-item">
+            <label id="endFrameLabel" for="endFrameInput">終了フレーム</label>
+            <input type="number" id="endFrameInput" value="100" min="0" disabled>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="captureCurrentBtn" class="btn-blue" disabled>現在のフレームを保存</button>
+        <button id="captureRangeBtn" class="btn-green" disabled>指定範囲をダウンロード</button>
+        <button id="captureAllBtn" class="btn-orange" disabled>全フレームをダウンロード</button>
+        <button id="stopBtn" style="background-color: #e74c3c; display: none;">中止</button>
+    </div>
+
+    <div id="status">動画ファイルを読み込んでください。</div>
+</div>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const videoInput = document.getElementById('videoInput');
+    const video = document.getElementById('videoPlayer');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const fpsInput = document.getElementById('fpsInput');
+    const waitInput = document.getElementById('waitInput');
+    const startFrameInput = document.getElementById('startFrameInput');
+    const endFrameInput = document.getElementById('endFrameInput');
+    
+    const captureCurrentBtn = document.getElementById('captureCurrentBtn');
+    const captureRangeBtn = document.getElementById('captureRangeBtn');
+    const captureAllBtn = document.getElementById('captureAllBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const status = document.getElementById('status');
+
+    let totalFrames = 0;
+    let isProcessing = false;
+    let shouldStop = false;
+
+    // 動画読み込み時の処理
+    videoInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const fileURL = URL.createObjectURL(file);
+        video.src = fileURL;
+        video.style.display = 'block';
+        
+        // メタデータ読み込み完了を待つ
+        video.onloadedmetadata = () => {
+            calculateFrames();
+            captureCurrentBtn.disabled = false;
+            captureRangeBtn.disabled = false;
+            captureAllBtn.disabled = false;
+            startFrameInput.disabled = false;
+            endFrameInput.disabled = false;
+        };
+    });
+
+    // FPSが変わったら総フレーム数を再計算
+    fpsInput.addEventListener('input', calculateFrames);
+
+    function calculateFrames() {
+        if (!video.duration) return;
+        const fps = parseInt(fpsInput.value) || 30;
+        totalFrames = Math.floor(video.duration * fps);
+        
+        document.getElementById('startFrameLabel').innerText = `開始フレーム (0 〜 ${totalFrames - 1})`;
+        document.getElementById('endFrameLabel').innerText = `終了フレーム (0 〜 ${totalFrames - 1})`;
+        
+        startFrameInput.max = totalFrames - 1;
+        endFrameInput.max = totalFrames - 1;
+        endFrameInput.value = totalFrames - 1; // 初期値は最後まで
+        
+        status.innerText = `動画長さ: ${video.duration.toFixed(2)}秒 (想定総フレーム数: 約${totalFrames}枚)`;
+    }
+
+    // 1枚保存
+    function downloadFrame(filename) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        const dataURL = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = dataURL;
+        link.download = filename;
+        link.click();
+    }
+
+    // 現在のフレーム
+    captureCurrentBtn.addEventListener('click', () => {
+        const fps = parseInt(fpsInput.value) || 30;
+        const currentFrame = Math.floor(video.currentTime * fps);
+        downloadFrame(`frame_${String(currentFrame).padStart(5, '0')}.png`);
+    });
+
+    // 中止ボタン
+    stopBtn.addEventListener('click', () => {
+        shouldStop = true;
+        status.innerText = "中止しています...";
+    });
+
+    // 「指定範囲」ボタン
+    captureRangeBtn.addEventListener('click', () => {
+        const start = parseInt(startFrameInput.value) || 0;
+        const end = parseInt(endFrameInput.value) || 0;
+        if (start > end) {
+            alert("開始フレームは終了フレームより小さい値を設定してください。");
+            return;
+        }
+        processFrames(start, end);
+    });
+
+    // 「全フレーム」ボタン
+    captureAllBtn.addEventListener('click', () => {
+        processFrames(0, totalFrames - 1);
+    });
+
+    // 連続処理のコアロジック
+    async function processFrames(startFrame, endFrame) {
+        if (isProcessing) return;
+        
+        const fps = parseInt(fpsInput.value) || 30;
+        const waitTime = parseInt(waitInput.value) || 300;
+        const totalToDownload = endFrame - startFrame + 1;
+
+        if (!confirm(`フレーム ${startFrame} から ${endFrame} まで（計 ${totalToDownload} 枚）の保存を開始します。\nブラウザの大量ダウンロード許可を求められた場合は必ず『許可』にしてください。`)) {
+            return;
+        }
+
+        // 画面ロックと設定
+        isProcessing = true;
+        shouldStop = false;
+        toggleControls(true);
+        video.pause();
+
+        let currentFrame = startFrame;
+        let downloadedCount = 0;
+
+        while (currentFrame <= endFrame) {
+            if (shouldStop) {
+                status.innerText = `中止されました。 (${downloadedCount}枚保存済み)`;
+                break;
+            }
+
+            // 秒数に変換してシーク
+            const targetTime = currentFrame / fps;
+            video.currentTime = targetTime;
+            
+            // シーク完了待ち
+            await new Promise((resolve) => {
+                video.onseeked = resolve;
+            });
+
+            // ダウンロード
+            const frameStr = String(currentFrame).padStart(5, '0');
+            downloadFrame(`frame_${frameStr}.png`);
+            downloadedCount++;
+
+            status.innerText = `進捗: ${downloadedCount} / ${totalToDownload} 枚目 (フレーム番号: ${currentFrame})`;
+
+            // 🔥【超重要】ブラウザに一息つかせるためのウェイト（処理の間隔）
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+
+            currentFrame++;
+        }
+
+        if (!shouldStop) {
+            status.innerText = `完了！ ${downloadedCount} 枚の画像をダウンロードしました。`;
+        }
+        
+        isProcessing = false;
+        toggleControls(false);
+    }
+
+    function toggleControls(disabled) {
+        captureCurrentBtn.disabled = disabled;
+        captureRangeBtn.disabled = disabled;
+        captureAllBtn.disabled = disabled;
+        fpsInput.disabled = disabled;
+        waitInput.disabled = disabled;
+        startFrameInput.disabled = disabled;
+        endFrameInput.disabled = disabled;
+        stopBtn.style.display = disabled ? 'inline-block' : 'none';
+    }
+</script>
+
+</body>
+</html>
